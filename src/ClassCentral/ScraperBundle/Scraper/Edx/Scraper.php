@@ -18,6 +18,7 @@ class Scraper extends ScraperAbstractInterface
     const EDX_RSS_API = "https://www.edx.org/api/v2/report/course-feed/rss?page=%s";
     const EDX_CARDS_API = "https://www.edx.org/api/discovery/v1/course_run_cards";
     const EDX_ENROLLMENT_COURSE_DETAIL = 'https://courses.edx.org/api/enrollment/v1/course/%s?include_expired=1'; // Contains pricing information
+    const EDX_API_ALL_COURSES_v1 = 'https://courses.edx.org/api/courses/v1/courses/?page=%s"';
     public STATIC $EDX_XSERIES_GUID = array(15096, 7046, 14906,14706,7191, 13721,13296, 14951, 13251,15861, 15381
         ,15701, 7056
     );
@@ -61,6 +62,35 @@ class Scraper extends ScraperAbstractInterface
             'Course Name', 'Certificate Name', 'Prices(in $)'
         ));
         */
+
+        /**
+         * NEW OFFICIAL API
+         */
+        $current_page = 2;
+        $opts = array(
+            'http'=>array(
+                'method'=>"GET",
+                'header'=>"Accept-language: en\r\n" .
+                    "Content-Type: application/json\r\n"
+            )
+        );
+
+        $context = stream_context_create($opts);
+        $edxCoursesJson = file_get_contents(sprintf(self::EDX_API_ALL_COURSES_v1,$current_page),false,$context);
+        $edxCourses = json_decode($edxCoursesJson,true);
+        print_r($edxCourses);
+        $totalPAges = $edxCourses['pagination']['numpages'];
+        while($current_page < $totalPAges)
+        {
+            $edxCourses = json_encode(file_get_contents(sprintf(self::EDX_API_ALL_COURSES_v1,$current_page)),true);
+            foreach($edxCourses['results'] as $edxCourse)
+            {
+                $this->out( $edxCourse['name']);
+            }
+            $current_page++;
+        }
+
+        exit();
         while(true) {
 
             $page++;
