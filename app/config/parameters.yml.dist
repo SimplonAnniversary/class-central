@@ -99,3 +99,6 @@ parameters:
 
     test_email: ~
     segment_write_key: ~
+
+    edx_api_client_id: ~
+    edx_api_client_secret: ~

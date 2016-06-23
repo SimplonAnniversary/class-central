@@ -19,8 +19,8 @@ class Scraper extends ScraperAbstractInterface
     const EDX_RSS_API = "https://www.edx.org/api/v2/report/course-feed/rss?page=%s";
     const EDX_CARDS_API = "https://www.edx.org/api/discovery/v1/course_run_cards";
     const EDX_ENROLLMENT_COURSE_DETAIL = 'https://courses.edx.org/api/enrollment/v1/course/%s?include_expired=1'; // Contains pricing information
-    const EDX_API_ALL_COURSES_BASE_v1 = 'https://courses.edx.org';
-    const EDX_API_ALL_COURSES_PATH_v1 = '/api/courses/v1/courses/?page=%s';
+    const EDX_API_ALL_COURSES_BASE_v1 = 'https://api.edx.org';
+    const EDX_API_ALL_COURSES_PATH_v1 = '/catalog/v1/catalogs/';
     public STATIC $EDX_XSERIES_GUID = array(15096, 7046, 14906,14706,7191, 13721,13296, 14951, 13251,15861, 15381
         ,15701, 7056
     );
@@ -68,6 +68,20 @@ class Scraper extends ScraperAbstractInterface
         /**
          * NEW OFFICIAL API
          */
+        $accessToken = $this->getAccessToken();
+        $client = new Client([
+            'base_uri' => self::EDX_API_ALL_COURSES_BASE_v1,
+            'timeout'  => 2.0,
+        ]);
+
+        $response = $client->get(self::EDX_API_ALL_COURSES_PATH_v1,[
+            'headers'=>[
+                'Authorization' => "JWT {$accessToken}"
+            ]
+        ]);
+        echo $response->getBody();
+        exit();
+
         $current_page = 1;
         $client = new Client([
             'base_uri' => self::EDX_API_ALL_COURSES_BASE_v1,
@@ -83,7 +97,7 @@ class Scraper extends ScraperAbstractInterface
             $edxCourses = json_decode($response->getBody(),true);
             foreach($edxCourses['results'] as $edxCourse)
             {
-                $this->out( $edxCourse['name']);
+                $this->out( $edxCourse['name'] . ' ' . $edxCourse['id']);
             }
             $current_page++;
         }
@@ -692,5 +706,28 @@ class Scraper extends ScraperAbstractInterface
             }
 
         }
+    }
+
+    private function getAccessToken()
+    {
+
+        $clientId = $this->getContainer()->getParameter('edx_api_client_id');
+        $clientSecret = $this->getContainer()->getParameter('edx_api_client_secret');
+        $client = new Client([
+            'base_uri' => self::EDX_API_ALL_COURSES_BASE_v1,
+            'timeout'  => 2.0,
+        ]);
+
+        $response = $client->post('/oauth2/v1/access_token',[
+            'form_params' => [
+                'grant_type' => 'client_credentials',
+                'client_id'=>$clientId,
+                'client_secret' => $clientSecret,
+                'token_type' => 'jwt'
+            ]
+        ]);
+
+        $r = json_decode($response->getBody(),true);
+        return $r['access_token'];
     }
 }
