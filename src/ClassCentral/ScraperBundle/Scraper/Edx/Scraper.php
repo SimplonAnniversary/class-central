@@ -85,8 +85,40 @@ class Scraper extends ScraperAbstractInterface
             $edxCourses = json_decode($response->getBody(),true);
             foreach($edxCourses['results'] as $edxCourse)
             {
-                $this->out( $edxCourse['title'] );
                 $course = $this->getCourseEntity($edxCourse);
+
+                $dbCourse = $this->dbHelper->getCourseByShortName( $course->getShortName() );
+
+                // Use the old shortname to pull the title
+                if(!$dbCourse)
+                {
+                    $dbCourse = $this->dbHelper->getCourseByShortName( $this->getOldShortName($edxCourse['key']));
+                }
+
+
+                // Do a fuzzy match on the course title
+                if (!$dbCourse)
+                {
+                    $result = $this->findCourseByName( $edxCourse['title'], $this->initiative);
+                    if( count($result) > 1)
+                    {
+                        $this->out("DUPLICATE ENTRIES FOR: " . $edxCourse['title']);
+                        foreach ($result as $item)
+                        {
+                            $this->out( "COURSE ID" . $item->getId() );
+                        }
+                        continue;
+                    }
+                    else if (count($result) == 1)
+                    {
+                        $dbCourse = $result;
+                    }
+                }
+
+                if(!$dbCourse)
+                {
+                    $this->out( $course->getName()   );
+                }
             }
 
             $nextUrl = $edxCourses['next'];
@@ -739,4 +771,14 @@ class Scraper extends ScraperAbstractInterface
         $r = json_decode($response->getBody(),true);
         return $r['access_token'];
     }
+
+    private function getOldShortName($key)
+    {
+        $keyParts = explode('+',$key);
+        $keyParts[] = 'edx';
+        $keyParts = array_reverse($keyParts);
+
+        return strtolower( implode( '_',$keyParts ));
+    }
+
 }
