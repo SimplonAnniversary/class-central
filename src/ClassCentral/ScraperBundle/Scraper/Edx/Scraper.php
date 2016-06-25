@@ -20,7 +20,7 @@ class Scraper extends ScraperAbstractInterface
     const EDX_CARDS_API = "https://www.edx.org/api/discovery/v1/course_run_cards";
     const EDX_ENROLLMENT_COURSE_DETAIL = 'https://courses.edx.org/api/enrollment/v1/course/%s?include_expired=1'; // Contains pricing information
     const EDX_API_ALL_COURSES_BASE_v1 = 'https://api.edx.org';
-    const EDX_API_ALL_COURSES_PATH_v1 = '/catalog/v1/catalogs/';
+    const EDX_API_ALL_COURSES_PATH_v1 = '/catalog/v1/catalogs/11/courses/';
     public STATIC $EDX_XSERIES_GUID = array(15096, 7046, 14906,14706,7191, 13721,13296, 14951, 13251,15861, 15381
         ,15701, 7056
     );
@@ -71,36 +71,31 @@ class Scraper extends ScraperAbstractInterface
         $accessToken = $this->getAccessToken();
         $client = new Client([
             'base_uri' => self::EDX_API_ALL_COURSES_BASE_v1,
-            'timeout'  => 2.0,
         ]);
 
-        $response = $client->get(self::EDX_API_ALL_COURSES_PATH_v1,[
-            'headers'=>[
-                'Authorization' => "JWT {$accessToken}"
-            ]
-        ]);
-        echo $response->getBody();
-        exit();
-
-        $current_page = 1;
-        $client = new Client([
-            'base_uri' => self::EDX_API_ALL_COURSES_BASE_v1,
-            'timeout'  => 2.0,
-        ]);
-        $response = $client->request('GET',sprintf(self::EDX_API_ALL_COURSES_PATH_v1,$current_page) );
-        $edxCourses = json_decode($response->getBody(),true);
-        $totalPAges = $edxCourses['pagination']['num_pages'];
-        while($current_page < $totalPAges)
+        $nextUrl = self::EDX_API_ALL_COURSES_PATH_v1;
+        while($nextUrl)
         {
-            $this->out("Retrieving PAGE #" . $current_page);
-            $response = $client->request('GET',sprintf(self::EDX_API_ALL_COURSES_PATH_v1,$current_page) );
+            $response = $client->get($nextUrl,[
+                'headers'=>[
+                    'Authorization' => "JWT {$accessToken}"
+                ]
+            ]);
+
             $edxCourses = json_decode($response->getBody(),true);
             foreach($edxCourses['results'] as $edxCourse)
             {
-                $this->out( $edxCourse['name'] . ' ' . $edxCourse['id']);
+                $this->out( $edxCourse['title'] );
+                $course = $this->getCourseEntity($edxCourse);
             }
-            $current_page++;
+
+            $nextUrl = $edxCourses['next'];
+            $this->out( $nextUrl );
         }
+
+
+        echo $edxCourses['count'] . "\n";
+        echo $edxCourses['next'] . "\n";
 
         exit();
         while(true) {
@@ -386,38 +381,52 @@ class Scraper extends ScraperAbstractInterface
         $defaultLanguage = $langMap[ 'English' ];
 
         $course = new Course();
-        $course->setShortName( $this->getShortName($c) );
+        $course->setShortName( 'edx_' . $c['key'] );
         $course->setInitiative( $this->initiative );
-        $course->setName( $c['course-code'] . ': ' . $c['title'] );
-        $course->setDescription( $c['description'] );
-        $course->setLongDescription( nl2br($c['description']) );
+        $course->setName(  $c['title'] );
+        $course->setDescription( $c['short_description'] );
+        $course->setLongDescription( nl2br($c['full_description']) );
         $course->setLanguage( $defaultLanguage);
         $course->setStream($defaultStream); // Default to Computer Science
-        $course->setVideoIntro( $c['course-video-youtube']);
-        $course->setUrl($c['link']);
+        $course->setUrl($c['marketing_url']);
+        $course->setCertificate( false );
+        $course->setCertificatePrice( 0 );
 
-        $course->setCertificate( $c['course-verified'] );
-        if($c['course-verified'])
+        if(!empty($c['video']['src']))
         {
-            // Signify its a paid certificate
-            $course->setCertificatePrice( Course::PAID_CERTIFICATE );
+            $course->setVideoIntro( $c['video']['src'] );
         }
-        else
+        // Check if the video is in course runs
+        foreach($c['course_runs'] as $courseRun)
         {
-            $course->setCertificatePrice( 0 );
-        }
+            if(!empty($courseRun['video']['src']))
+            {
+                $course->setVideoIntro( $courseRun['video']['src'] );
+            }
+            if(!empty($courseRun['marketing_url']) )
+            {
+                $course->setUrl($courseRun['marketing_url']);
+            }
 
-        // Calculate length
-        $length = null;
-        if( !empty($c['course-end']))
-        {
-            $start = new \DateTime( $c['course-start'] );
-            $end = new \DateTime( $c['course-end'] );
-            $length = ceil( $start->diff($end)->days/7 );
-        }
+            foreach($courseRun['seats'] as $seat)
+            {
+                if($seat['type'] == 'verified')
+                {
+                    $course->setCertificatePrice( $seat['price'] );
+                    $course->setCertificate( true );
+                }
+            }
 
-        $course->setDurationMin($length);
-        $course->setDurationMax($length);
+            if($courseRun['pacing_type'] == 'instructor_paced')
+            {
+                $length = null;
+                $start = new \DateTime( $courseRun['start'] );
+                $end = new \DateTime( $courseRun['end'] );
+                $length = ceil( $start->diff($end)->days/7 );
+                $course->setDurationMin($length);
+                $course->setDurationMax($length);
+            }
+        }
 
         return $course;
     }
