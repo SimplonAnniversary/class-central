@@ -31,12 +31,14 @@ class Scraper extends ScraperAbstractInterface
 
     private $courseFields = array(
         'Url', 'Description', 'DurationMin','DurationMax', 'Name','LongDescription','VideoIntro','Certificate',
-        'CertificatePrice'
+        'CertificatePrice','ShortName'
     );
 
     private $offeringFields = array(
         'StartDate', 'EndDate', 'Url'
     );
+
+    private $skipNames = array('DELETE','OBSOLETE','STAGE COURSE', 'Test Course');
 
     /**
      * Using the CSV
@@ -72,7 +74,7 @@ class Scraper extends ScraperAbstractInterface
         $client = new Client([
             'base_uri' => self::EDX_API_ALL_COURSES_BASE_v1,
         ]);
-
+        $em = $this->getManager();
         $nextUrl = self::EDX_API_ALL_COURSES_PATH_v1;
         while($nextUrl)
         {
@@ -86,6 +88,31 @@ class Scraper extends ScraperAbstractInterface
             foreach($edxCourses['results'] as $edxCourse)
             {
                 $course = $this->getCourseEntity($edxCourse);
+
+                // Check if this course has to be skipped
+                $skip = false;
+                foreach($this->skipNames as $skipName)
+                {
+                    if (strpos(strtolower($course->getName()), strtolower($skipName)) !== false) {
+                        $skip = true;
+                        $this->out("SKIPPING  " . $course->getName());
+                        break;
+                    }
+                }
+                if($skip) continue;
+
+                // Get the latest run of hte course
+                $latestRun = null;
+                if(!empty($edxCourse['course_runs']))
+                {
+                    $latestRun = array_pop($edxCourse['course_runs']);
+                }
+
+                $cTags = array();
+                foreach( $edxCourse['owners']  as $school)
+                {
+                    $cTags[] = strtolower($school['key']);
+                }
 
                 $dbCourse = $this->dbHelper->getCourseByShortName( $course->getShortName() );
 
@@ -115,10 +142,99 @@ class Scraper extends ScraperAbstractInterface
                     }
                 }
 
-                if(!$dbCourse)
+
+                if( !$dbCourse )
                 {
-                    $this->out( $course->getName()   );
+
+                    if($this->doCreate())
+                    {
+                        $this->out("NEW COURSE - " . $course->getName());
+                        // NEW COURSE
+                        if ($this->doModify())
+                        {
+
+                            if(!empty($latestRun['staff']))
+                            {
+                                foreach( $latestRun['staff'] as $staff )
+                                {
+                                    $insName = $staff['name'];
+                                    if(!empty($insName))
+                                    {
+                                        $course->addInstructor($this->dbHelper->createInstructorIfNotExists($insName));
+                                    }
+                                }
+                            }
+
+
+                            $em->persist($course);
+                            $em->flush();
+
+                            $tagService->saveCourseTags( $course, $cTags);
+
+                            $this->dbHelper->sendNewCourseToSlack( $course, $this->initiative );
+
+                            if($latestRun['image']['src'])
+                            {
+                                $this->uploadImageIfNecessary( $latestRun['image']['src'], $course);
+                            }
+
+
+
+                        }
+                    }
                 }
+                else
+                {
+                    // Check if any fields are modified
+                    $courseModified = false;
+                    $changedFields = array(); // To keep track of fields that have changed
+                    foreach($this->courseFields as $field)
+                    {
+                        $getter = 'get' . $field;
+                        $setter = 'set' . $field;
+                        if($course->$getter() != $dbCourse->$getter())
+                        {
+                            $courseModified = true;
+
+                            // Add the changed field to the changedFields array
+                            $changed = array();
+                            $changed['field'] = $field;
+                            $changed['old'] =$dbCourse->$getter();
+                            $changed['new'] = $course->$getter();
+                            $changedFields[] = $changed;
+
+                            $dbCourse->$setter($course->$getter());
+                        }
+
+                    }
+
+                    if($courseModified && $this->doUpdate())
+                    {
+                        //$this->out( "Database course changed " . $dbCourse->getName());
+                        // Course has been modified
+                        $this->out("UPDATE COURSE - " . $dbCourse->getName() . " - ". $dbCourse->getId());
+                        $this->outputChangedFields($changedFields);
+                        if ($this->doModify())
+                        {
+                            $em->persist($dbCourse);
+                            $em->flush();
+
+                            // Update tags
+                            $tagService->saveCourseTags( $dbCourse, $cTags);
+
+                            if($latestRun['image']['src'])
+                            {
+                                $this->uploadImageIfNecessary($latestRun['image']['src'], $dbCourse);
+                            }
+                        }
+
+                    }
+
+
+                    $course = $dbCourse;
+                }
+
+
             }
 
             $nextUrl = $edxCourses['next'];
