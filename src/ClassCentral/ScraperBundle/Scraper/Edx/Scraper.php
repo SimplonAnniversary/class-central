@@ -234,6 +234,11 @@ class Scraper extends ScraperAbstractInterface
                     $course = $dbCourse;
                 }
 
+                foreach($edxCourse['course_runs'] as $run)
+                {
+                    $offering = $this->getOfferingFromCourseRun($run,$course);
+                }
+
 
             }
 
@@ -895,6 +900,20 @@ class Scraper extends ScraperAbstractInterface
         $keyParts = array_reverse($keyParts);
 
         return strtolower( implode( '_',$keyParts ));
+    }
+
+    private function getOfferingFromCourseRun($run,$course)
+    {
+        $offering = new Offering();
+
+        $offering->setShortName( 'edx_' . $run['key'] );
+        $offering->setCourse( $course );
+        $offering->setUrl( $run['marketing_url'] );
+        $offering->setStatus( Offering::START_DATES_KNOWN );
+        $offering->setStartDate( new \DateTime( $run['start'] ) );
+        $offering->setEndDate(  new \DateTime(  $run['end'] ) );
+
+        return $offering;
     }
 
 }
