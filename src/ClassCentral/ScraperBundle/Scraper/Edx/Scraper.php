@@ -905,6 +905,7 @@ class Scraper extends ScraperAbstractInterface
     private function getOfferingFromCourseRun($run,$course)
     {
         $offering = new Offering();
+        $now = new \DateTime();
 
         $offering->setShortName( 'edx_' . $run['key'] );
         $offering->setCourse( $course );
@@ -912,6 +913,23 @@ class Scraper extends ScraperAbstractInterface
         $offering->setStatus( Offering::START_DATES_KNOWN );
         $offering->setStartDate( new \DateTime( $run['start'] ) );
         $offering->setEndDate(  new \DateTime(  $run['end'] ) );
+
+        if($run['pacing_type'] == 'instructor_paced')
+        {
+            // Do nothing
+        }
+        elseif($run['pacing_type'] == 'self_paced')
+        {
+            if($now > $offering->getStartDate())
+            {
+                $offering->setStatus( Offering::COURSE_OPEN );
+            }
+            else
+            {
+                $offering->setStatus( Offering::START_DATES_KNOWN );
+            }
+        }
+
 
         return $offering;
     }
